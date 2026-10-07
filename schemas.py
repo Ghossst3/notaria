@@ -62,12 +62,41 @@ def aplicar_valores(datos: M, valores: dict[str, str]) -> M:
     for ruta, campo in recorrer_campos(nuevo):
         if ruta not in valores:
             continue
-        editado = (valores[ruta] or "").strip()
-        if editado == (campo.valor or "").strip():
-            continue
+        bruto = (valores[ruta] or "").strip()
+        if bruto == (campo.valor or "").strip():
+            continue  # sin cambios: se conserva el dato y su evidencia originales
+        editado = _normalizar(ruta, bruto)
         campo.valor = editado
         campo.evidencia = EVIDENCIA_MANUAL if editado else ""
     return nuevo
+
+
+def _normalizar(ruta: str, texto: str) -> str:
+    """CURP y RFC se escriben en mayúsculas y sin espacios, aunque la persona los teclee distinto."""
+    if ruta.rsplit(".", 1)[-1] in ("curp", "rfc"):
+        return texto.replace(" ", "").upper()
+    return texto
+
+
+def _estructura_vacia(clase: type[BaseModel]) -> dict:
+    estructura: dict = {}
+    for nombre, info in clase.model_fields.items():
+        anotacion = info.annotation
+        if anotacion is Campo:
+            estructura[nombre] = {"valor": "", "evidencia": ""}
+        elif isinstance(anotacion, type) and issubclass(anotacion, BaseModel):
+            estructura[nombre] = _estructura_vacia(anotacion)
+        else:
+            raise TypeError(f"Tipo no soportado en {clase.__name__}.{nombre}: se esperaba Campo o un modelo anidado")
+    return estructura
+
+
+def crear_vacio(tipo: type[M]) -> M:
+    """
+    Instancia de `tipo` con TODOS los campos vacíos. Sirve para el modo manual: la persona
+    captura los datos desde cero en la pantalla de revisión, sin subir documentos.
+    """
+    return tipo.model_validate(_estructura_vacia(tipo))
 
 
 class Persona(BaseModel):
